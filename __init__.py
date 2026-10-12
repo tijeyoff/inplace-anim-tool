@@ -4,7 +4,7 @@ bl_info = {
     "version": (1, 0, 0),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar (N) > In-Place",
-    "description": "One-click conversion of Root Motion animations to In-Place animations",
+    "description": "Convert Root Motion animations to In-Place animations",
     "category": "Animation",
     "doc_url": "https://github.com/tijeyoff",
     "tracker_url": "https://github.com/tijeyoff",
@@ -363,9 +363,9 @@ class InPlaceProperties(bpy.types.PropertyGroup):
 # ------------------------------------------------------------------------
 
 class INPLACE_OT_make_in_place(bpy.types.Operator):
-    """Converts the active animation to In-Place with one click"""
+    """Converts the active animation to In-Place"""
     bl_idname = "inplace.make_in_place"
-    bl_label = "Make In-Place (1-Click)"
+    bl_label = "Make In-Place"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -812,11 +812,11 @@ class INPLACE_PT_main_panel(bpy.types.Panel):
         opts_col.prop(props, "anchor", text="Anchor")
         opts_col.prop(props, "create_backup", text="Backup Action")
 
-        # 5. One-Click Conversion Action
+        # 5. Conversion Action
         layout.separator(factor=0.5)
         btn_col = layout.column(align=True)
         btn_col.scale_y = 1.6
-        btn_col.operator("inplace.make_in_place", text="⚡ Make In-Place (1-Click)", icon='PLAY')
+        btn_col.operator("inplace.make_in_place", text="Make In-Place", icon='PLAY')
 
         # Restore button if backup exists
         if props.last_backup_action and props.last_backup_action in bpy.data.actions:

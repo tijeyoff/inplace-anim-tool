@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/Author-TIJEY%20Studio-9cf.svg?style=flat-square" alt="Author" />
 </p>
 
-A lightweight, powerful, and mathematically precise Blender add-on that converts **Root Motion (travelling) animations** into **In-Place animations** with a single click.
+A lightweight, powerful, and mathematically precise Blender add-on that converts **Root Motion (travelling) animations** into **In-Place animations**.
 
 Works seamlessly with animations from **Cascadeur**, **Mixamo**, **Motion Capture (mocap)**, custom rigs (**Metarig / Rigify**), and standard game character hierarchies.
 
@@ -26,13 +26,13 @@ It computes motion in **True 3D World Space** ($T_{\text{world}} = R_{\text{worl
 
 ## ⚡ Key Features
 
-- **⚡ 1-Click Conversion:** Just select your armature and click `Make In-Place (1-Click)`.
+- **🚀 Instant Conversion:** Just select your armature and click `Make In-Place`.
 - **🎯 Smart Auto-Detection:** Automatically scans action curves and detects the true root-driving bone (`spine`, `hips`, `pelvis`, `root`) or Armature object.
 - **🦶 Zero Floor Sinking:** World-matrix 3D projection eliminates bone tilt cross-coupling. Feet stay on the floor across the entire timeline.
 - **🎮 Game Engine Ready:** Choose between `Origin (0, 0, 0)` for game engine controllers (Unreal Engine / Unity) or `First Frame Position` to retain initial staging.
 - **🏃 Natural Sway Preservation (`Remove Drift` Mode):** Cancels net travel while keeping subtle hip swaying and weight-shifting oscillations intact.
 - **🦴 Root Bone Extraction:** Automatically generates a ground-level `root` bone and transfers forward movement onto it for Unreal/Unity Root Motion pipelines.
-- **🛡️ 100% Non-Destructive:** Automatically creates an action backup before applying changes. Restore the original animation anytime with 1 click.
+- **🛡️ 100% Non-Destructive:** Automatically creates an action backup before applying changes. Restore the original animation anytime with a single click.
 - **🌐 Broad Version Support:** Compatible with **Blender 3.0, 3.3 LTS, 3.6 LTS, 4.0, 4.1, 4.2 LTS, 4.4, and 4.5+**.
 
 ---
@@ -58,7 +58,7 @@ It computes motion in **True 3D World Space** ($T_{\text{world}} = R_{\text{worl
 2. Click on the **`In-Place`** tab.
 3. Select your animated armature.
 4. The tool automatically analyzes the animation and displays motion metrics ($\Delta X$, $\Delta Y$, $\Delta Z$).
-5. Click **`⚡ Make In-Place (1-Click)`**.
+5. Click **`Make In-Place`**.
 6. Press Spacebar to play your in-place animation!
 
 ---

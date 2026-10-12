@@ -3,7 +3,7 @@ schema_version = "1.0.0"
 id = "inplace_anim_tool"
 name = "In-Place Animation Tool"
 version = "1.0.0"
-tagline = "Convert Root Motion to In-Place animation with one click"
+tagline = "Convert Root Motion to In-Place animation with true 3D precision"
 maintainer = "TIJEY Studio"
 type = "add-on"
 
