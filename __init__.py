@@ -6,8 +6,8 @@ bl_info = {
     "location": "View3D > Sidebar (N) > In-Place",
     "description": "Convert Root Motion animations to In-Place animations",
     "category": "Animation",
-    "doc_url": "https://github.com/tijeyoff",
-    "tracker_url": "https://github.com/tijeyoff",
+    "doc_url": "https://extensions.blender.org/add-ons/inplace_anim_tool/",
+    "tracker_url": "https://github.com/tijeyoff/inplace-anim-tool/issues",
 }
 
 import os

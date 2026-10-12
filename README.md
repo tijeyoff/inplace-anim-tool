@@ -1,6 +1,7 @@
 # In-Place Animation Tool for Blender
 
 <p align="center">
+  <a href="https://extensions.blender.org/add-ons/inplace_anim_tool/"><img src="https://img.shields.io/badge/Blender_Extensions-inplace__anim__tool-295b87.svg?style=flat-square&logo=blender" alt="Blender Extensions" /></a>
   <img src="https://img.shields.io/badge/Blender-3.0%20--%204.5%2B-orange.svg?style=flat-square&logo=blender" alt="Blender Support" />
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=flat-square" alt="License" />
   <img src="https://img.shields.io/badge/Version-1.0.0-green.svg?style=flat-square" alt="Version" />
