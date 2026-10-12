@@ -1,0 +1,20 @@
+schema_version = "1.0.0"
+
+id = "inplace_anim_tool"
+name = "In-Place Animation Tool"
+version = "1.0.0"
+tagline = "Convert Root Motion to In-Place animation with one click"
+maintainer = "TIJEY Studio"
+type = "add-on"
+
+blender_version_min = "3.0.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+website = "https://github.com/tijeyoff"
+
+tags = [
+  "Animation",
+]

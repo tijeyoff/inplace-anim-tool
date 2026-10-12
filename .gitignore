@@ -1,0 +1,22 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Blender backup & temp files
+*.blend1
+*.blend2
+*.bphys
+*.crash.txt
+quit.blend
+
+# Build archives
+*.zip
+*.tar.gz
+
+# OS & Editor generated files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
