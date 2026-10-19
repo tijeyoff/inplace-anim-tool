@@ -828,6 +828,27 @@ class INPLACE_PT_main_panel(bpy.types.Panel):
         adv_col.operator("inplace.extract_root_bone", text="Extract Motion to Root Bone", icon='DRIVER')
 
 
+class INPLACE_PT_info_panel(bpy.types.Panel):
+    """Information panel showing addon metadata"""
+    bl_label = "Information"
+    bl_idname = "VIEW3D_PT_inplace_info"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "In-Place"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw_header(self, context):
+        self.layout.label(text="", icon="INFO")
+
+    def draw(self, context):
+        layout = self.layout
+        box = layout.box()
+        col = box.column(align=True)
+        col.label(text="In-Place Animation Tool", icon='ARMATURE_DATA')
+        col.label(text="Version: 1.0.1", icon='LAYER_ACTIVE')
+        col.label(text="Author: TIJEY Studio", icon='USER')
+
+
 # ------------------------------------------------------------------------
 # Registration
 # ------------------------------------------------------------------------
@@ -841,6 +862,7 @@ classes = (
     INPLACE_OT_restore_backup,
     INPLACE_OT_extract_root_bone,
     INPLACE_PT_main_panel,
+    INPLACE_PT_info_panel,
 )
 
 def register():
