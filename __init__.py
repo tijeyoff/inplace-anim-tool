@@ -1,7 +1,7 @@
 bl_info = {
     "name": "In-Place Animation Tool",
     "author": "TIJEY Studio",
-    "version": (1, 0, 0),
+    "version": (1, 0, 1),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar (N) > In-Place",
     "description": "Convert Root Motion animations to In-Place animations",

@@ -4,7 +4,7 @@
   <a href="https://extensions.blender.org/add-ons/inplace_anim_tool/"><img src="https://img.shields.io/badge/Blender_Extensions-inplace__anim__tool-295b87.svg?style=flat-square&logo=blender" alt="Blender Extensions" /></a>
   <img src="https://img.shields.io/badge/Blender-3.0%20--%204.5%2B-orange.svg?style=flat-square&logo=blender" alt="Blender Support" />
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=flat-square" alt="License" />
-  <img src="https://img.shields.io/badge/Version-1.0.0-green.svg?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/Version-1.0.1-green.svg?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/Author-TIJEY%20Studio-9cf.svg?style=flat-square" alt="Author" />
 </p>
 
@@ -41,13 +41,13 @@ It computes motion in **True 3D World Space** ($T_{\text{world}} = R_{\text{worl
 ## 📥 Installation
 
 ### Method A: Blender 4.2+ (Extensions Platform)
-1. Download the latest `inplace_anim_tool-1.0.0.zip` from [Releases](https://github.com/tijeyoff/inplace-anim-tool/releases).
+1. Download the latest `inplace_anim_tool-1.0.1.zip` from [Releases](https://github.com/tijeyoff/inplace-anim-tool/releases).
 2. In Blender, go to **Edit > Preferences > Get Extensions**.
 3. Click the menu dropdown (top-right) and select **Install from Disk...**.
 4. Select the `.zip` file. Done!
 
 ### Method B: Blender 3.0 – 4.1 (Standard Add-on)
-1. Download `inplace_anim_tool-1.0.0.zip` from [Releases](https://github.com/tijeyoff/inplace-anim-tool/releases).
+1. Download `inplace_anim_tool-1.0.1.zip` from [Releases](https://github.com/tijeyoff/inplace-anim-tool/releases).
 2. Go to **Edit > Preferences > Add-ons**.
 3. Click **Install...**, select the `.zip` file, and enable the checkmark next to **Animation: In-Place Animation Tool**.
 
