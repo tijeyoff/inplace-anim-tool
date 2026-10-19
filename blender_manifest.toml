@@ -13,8 +13,6 @@ license = [
   "SPDX:GPL-3.0-or-later",
 ]
 
-website = "https://extensions.blender.org/add-ons/inplace_anim_tool/"
-
 tags = [
   "Animation",
 ]

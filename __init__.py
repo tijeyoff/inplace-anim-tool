@@ -13,9 +13,6 @@ bl_info = {
 import os
 import bpy
 import mathutils
-import bpy.utils.previews
-
-custom_icons = None
 
 # ------------------------------------------------------------------------
 # Utility & Smart Motion Analysis
@@ -831,49 +828,6 @@ class INPLACE_PT_main_panel(bpy.types.Panel):
         adv_col.operator("inplace.extract_root_bone", text="Extract Motion to Root Bone", icon='DRIVER')
 
 
-class INPLACE_PT_info_panel(bpy.types.Panel):
-    """Information panel showing addon metadata and author links"""
-    bl_label = "Information"
-    bl_idname = "VIEW3D_PT_inplace_info"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "In-Place"
-    bl_options = {'DEFAULT_CLOSED'}
-
-    def draw_header(self, context):
-        self.layout.label(text="", icon="INFO")
-
-    def draw(self, context):
-        global custom_icons
-        layout = self.layout
-
-        # 1. Tool Info & Update Section
-        box_info = layout.box()
-        col_info = box_info.column(align=True)
-        col_info.label(text="In-Place Animation Tool v1.0", icon='TOOL_SETTINGS')
-        col_info.label(text="Author: TIJEY Studio", icon='USER')
-
-        col_info.separator(factor=0.5)
-        row_ext = col_info.row(align=True)
-        row_ext.scale_y = 1.25
-        row_ext.operator("wm.url_open", text="Check Updates (Extensions)", icon='FILE_REFRESH').url = "https://extensions.blender.org/add-ons/inplace_anim_tool/"
-
-        # 2. Distinct GitHub Developer Card
-        box_gh = layout.box()
-        col_gh = box_gh.column(align=True)
-
-        gh_icon_id = 0
-        if custom_icons and "github" in custom_icons:
-            gh_icon_id = custom_icons["github"].icon_id
-
-        row_gh = col_gh.row(align=True)
-        row_gh.scale_y = 1.35
-        if gh_icon_id:
-            row_gh.operator("wm.url_open", text="GitHub: @tijeyoff", icon_value=gh_icon_id).url = "https://github.com/tijeyoff"
-        else:
-            row_gh.operator("wm.url_open", text="GitHub: @tijeyoff", icon='URL').url = "https://github.com/tijeyoff"
-
-
 # ------------------------------------------------------------------------
 # Registration
 # ------------------------------------------------------------------------
@@ -887,27 +841,14 @@ classes = (
     INPLACE_OT_restore_backup,
     INPLACE_OT_extract_root_bone,
     INPLACE_PT_main_panel,
-    INPLACE_PT_info_panel,
 )
 
 def register():
-    global custom_icons
     for cls in classes:
         bpy.utils.register_class(cls)
     bpy.types.Scene.inplace_props = bpy.props.PointerProperty(type=InPlaceProperties)
 
-    # Load custom preview icons
-    custom_icons = bpy.utils.previews.new()
-    icons_dir = os.path.join(os.path.dirname(__file__), "icons")
-    gh_icon_path = os.path.join(icons_dir, "github.png")
-    if os.path.exists(gh_icon_path):
-        custom_icons.load("github", gh_icon_path, 'IMAGE')
-
 def unregister():
-    global custom_icons
-    if custom_icons:
-        bpy.utils.previews.remove(custom_icons)
-        custom_icons = None
     if hasattr(bpy.types.Scene, "inplace_props"):
         del bpy.types.Scene.inplace_props
     for cls in reversed(classes):
