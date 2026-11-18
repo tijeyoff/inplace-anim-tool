@@ -10,13 +10,24 @@ bl_info = {
     "tracker_url": "https://github.com/tijeyoff/inplace-anim-tool/issues",
 }
 
-import os
+import math
 import bpy
 import mathutils
+from bpy_extras import anim_utils
 
 # ------------------------------------------------------------------------
 # Utility & Smart Motion Analysis
 # ------------------------------------------------------------------------
+
+def get_action_fcurves(obj):
+    anim_data = obj.animation_data
+    if not anim_data or not anim_data.action:
+        return ()
+    if not hasattr(anim_data, "action_slot"):
+        return anim_data.action.fcurves
+    bag = anim_utils.action_get_channelbag_for_slot(anim_data.action, anim_data.action_slot)
+    return bag.fcurves if bag is not None else ()
+
 
 def is_side_bone(bone_name):
     """Check if bone is a lateral side limb (.L, .R, _l, _r) which is never the root/hips."""
@@ -28,30 +39,99 @@ def is_side_bone(bone_name):
             '.l.' in b_low or '.r.' in b_low)
 
 
-def get_world_rotation_matrix(arm_obj, bone_name=None):
-    """
-    Returns the 3x3 orthonormal rotation matrix that transforms
-    a translation vector from local coordinates into world coordinates.
-    T_world = R @ v_local
-    v_local = R.transposed() @ T_world
+def get_translation_basis(obj, bone_name=None):
+    """Map a location channel to scene units, including object import scale."""
+    if bone_name:
+        bone = obj.data.bones[bone_name]
+        return obj.matrix_world.to_3x3() @ bone.matrix_local.to_3x3()
+    if obj.parent:
+        return (obj.matrix_world @ obj.matrix_basis.inverted_safe()).to_3x3()
+    return mathutils.Matrix.Identity(3)
 
-    This completely eliminates bone-axis cross coupling (such as vertical Metarig bones
-    where local Z couples forward translation and height), ensuring the character's feet
-    stay perfectly planted on the floor without any sinking or floating!
-    """
-    if not arm_obj:
-        return mathutils.Matrix.Identity(3)
 
-    # Armature object rotation in world space
-    arm_rot = arm_obj.matrix_world.to_3x3().normalized()
+def scene_length_scale():
+    units = bpy.context.scene.unit_settings
+    return units.scale_length if units.system != 'NONE' else 1.0
 
-    if not bone_name or not arm_obj.data or bone_name not in arm_obj.data.bones:
-        return arm_rot
 
-    # Bone rest matrix in armature space
-    b_data = arm_obj.data.bones[bone_name]
-    rest_rot = b_data.matrix_local.to_3x3()
-    return arm_rot @ rest_rot
+def sample_locations(curves, path, defaults):
+    """Read all source values before writing, including subframe and baked keys."""
+    channels = [curves.find(path, index=i) for i in range(3)] if curves else []
+    times = {p.co.x for fc in channels if fc for p in fc.keyframe_points}
+    times.update(p.co.x for fc in channels if fc for p in fc.sampled_points)
+    if not times:
+        return {}
+    times.update(range(math.ceil(min(times)), math.floor(max(times)) + 1))
+    return {
+        t: mathutils.Vector(tuple(fc.evaluate(t) if fc else defaults[i]
+                                  for i, fc in enumerate(channels)))
+        for t in sorted(times)
+    }
+
+
+def write_locations(curves, path, samples, axes=range(3)):
+    """Bake three synchronized channels so a world-axis lock also holds between keys."""
+    times = list(samples)
+    for i in axes:
+        fc = curves.find(path, index=i)
+        if fc is None:
+            fc = curves.new(data_path=path, index=i)
+        if fc.sampled_points:
+            fc.convert_to_keyframes(math.floor(times[0]), math.ceil(times[-1]))
+        for mod in list(fc.modifiers):
+            fc.modifiers.remove(mod)  # Their evaluated values are in samples.
+        points = fc.keyframe_points
+        if hasattr(points, "clear"):
+            points.clear()
+        else:
+            # Blender 3.0–3.2 predates FCurveKeyframePoints.clear().
+            while points:
+                points.remove(points[-1], fast=True)
+        points.add(len(times))
+        points.foreach_set("co", [v for t in times for v in (t, samples[t][i])])
+        for key in points:
+            key.interpolation = 'LINEAR'
+        fc.update()
+
+
+def slot_key(anim_data):
+    return str(getattr(anim_data, "action_slot_handle", 0))
+
+
+def assign_matching_slot(anim_data, action):
+    slot = getattr(anim_data, "action_slot", None)
+    handle = slot.handle if slot else None
+    anim_data.action = action
+    if handle is not None:
+        anim_data.action_slot = next(s for s in action.slots if s.handle == handle)
+
+
+def individual_action(obj):
+    anim_data = obj.animation_data
+    action = anim_data.action
+    if action.users > 1 + int(action.use_fake_user) or action.library:
+        action = action.copy()
+        assign_matching_slot(anim_data, action)
+    return action
+
+
+def backup_for(obj, props):
+    if not obj or obj.type != 'ARMATURE' or not obj.animation_data:
+        return None
+    anim_data = obj.animation_data
+    action = anim_data.action
+    if not action:
+        return None
+    backups = action.get("_inplace_slot_backups")
+    if backups is not None:
+        return backups.get(slot_key(anim_data))
+    # Files saved by 1.0.1 only contain a scene-wide backup name.
+    backup = bpy.data.actions.get(props.last_backup_action)
+    if backup and backup.name.rpartition("_Original_Backup")[0] == action.name:
+        if not hasattr(anim_data, "action_slot") or (
+                anim_data.action_slot and any(s.handle == anim_data.action_slot.handle for s in backup.slots)):
+            return backup
+    return None
 
 
 def get_bones_with_motion(arm_obj):
@@ -62,25 +142,20 @@ def get_bones_with_motion(arm_obj):
     if not arm_obj or arm_obj.type != 'ARMATURE' or not arm_obj.animation_data or not arm_obj.animation_data.action:
         return {}
 
-    action = arm_obj.animation_data.action
+    names_by_path = {bone.path_from_id("location"): bone.name for bone in arm_obj.pose.bones}
     bone_curves = {}
-
-    for fc in action.fcurves:
-        if fc.data_path.startswith('pose.bones["') and '"].location' in fc.data_path:
-            b_name = fc.data_path.split('pose.bones["')[1].split('"].location')[0]
-            if not arm_obj.pose or b_name not in arm_obj.pose.bones:
-                continue
-            if b_name not in bone_curves:
-                bone_curves[b_name] = {}
-            bone_curves[b_name][fc.array_index] = fc
+    for fc in get_action_fcurves(arm_obj):
+        name = names_by_path.get(fc.data_path)
+        if name and fc.array_index in (0, 1, 2):
+            bone_curves.setdefault(name, {})[fc.array_index] = fc
 
     bone_motion = {}
     for b_name, curves in bone_curves.items():
-        frames = sorted(set(kp.co[0] for fc in curves.values() for kp in fc.keyframe_points))
+        frames = sorted({p.co.x for fc in curves.values() for points in (fc.keyframe_points, fc.sampled_points) for p in points})
         if len(frames) < 2:
             continue
 
-        R = get_world_rotation_matrix(arm_obj, b_name)
+        R = get_translation_basis(arm_obj, b_name)
         xs, ys = [], []
         for f in frames:
             v_loc = mathutils.Vector((
@@ -96,7 +171,7 @@ def get_bones_with_motion(arm_obj):
         tr_x = abs(xs[-1] - xs[0])
         rng_y = max(ys) - min(ys)
         tr_y = abs(ys[-1] - ys[0])
-        h_max = max(rng_x, tr_x, rng_y, tr_y)
+        h_max = max(rng_x, tr_x, rng_y, tr_y) * scene_length_scale()
 
         if h_max > 0.005:
             bone_motion[b_name] = {
@@ -170,7 +245,7 @@ def find_root_or_hips_bone(arm_obj):
     if unparented:
         return unparented[0]
 
-    return pose_bones[0].name
+    return pose_bones[0].name if pose_bones else ""
 
 
 def resolve_effective_target_bone(arm_obj, props):
@@ -221,18 +296,21 @@ def analyze_motion(arm_obj, props):
     if not anim_data or not anim_data.action:
         return False, stats, ""
 
-    action = anim_data.action
+    fcurves = get_action_fcurves(arm_obj)
     target_bone = resolve_effective_target_bone(arm_obj, props)
 
     loc_curves = {}
+    bone_name_for_mat = None
     if target_bone and props.target_scope in {'AUTO', 'BONE', 'BOTH'}:
-        b_path = f'pose.bones["{target_bone}"].location'
-        for fc in action.fcurves:
+        b_path = arm_obj.pose.bones[target_bone].path_from_id("location")
+        for fc in fcurves:
             if fc.data_path == b_path and fc.array_index in (0, 1, 2):
                 loc_curves[fc.array_index] = fc
 
+    if loc_curves:
+        bone_name_for_mat = target_bone
     if not loc_curves and props.target_scope in {'OBJECT', 'BOTH', 'AUTO'}:
-        for fc in action.fcurves:
+        for fc in fcurves:
             if fc.data_path == 'location' and fc.array_index in (0, 1, 2):
                 loc_curves[fc.array_index] = fc
 
@@ -240,13 +318,13 @@ def analyze_motion(arm_obj, props):
         return False, stats, target_bone
 
     stats['has_curves'] = True
-    bone_name_for_mat = target_bone if (target_bone and arm_obj.data and target_bone in arm_obj.data.bones) else None
-    R = get_world_rotation_matrix(arm_obj, bone_name_for_mat)
+    R = get_translation_basis(arm_obj, bone_name_for_mat)
 
-    frames = sorted(set(kp.co[0] for fc in loc_curves.values() for kp in fc.keyframe_points))
+    frames = sorted({p.co.x for fc in loc_curves.values() for points in (fc.keyframe_points, fc.sampled_points) for p in points})
     if len(frames) < 2:
         return False, stats, target_bone
 
+    scale = scene_length_scale()
     xs, ys, zs = [], [], []
     for f in frames:
         v_local = mathutils.Vector((
@@ -254,7 +332,7 @@ def analyze_motion(arm_obj, props):
             loc_curves[1].evaluate(f) if 1 in loc_curves else 0.0,
             loc_curves[2].evaluate(f) if 2 in loc_curves else 0.0,
         ))
-        v_world = R @ v_local
+        v_world = (R @ v_local) * scale
         xs.append(v_world.x)
         ys.append(v_world.y)
         zs.append(v_world.z)
@@ -272,7 +350,7 @@ def analyze_motion(arm_obj, props):
     horiz_range = max(stats['X']['range'], stats['Y']['range'])
     stats['horiz_max'] = max(horiz_travel, horiz_range)
 
-    is_root_motion = (stats['horiz_max'] > 0.05)
+    is_root_motion = (horiz_travel > 0.05)
     return is_root_motion, stats, target_bone
 
 
@@ -373,128 +451,76 @@ class INPLACE_OT_make_in_place(bpy.types.Operator):
     def execute(self, context):
         obj = context.active_object
         anim_data = obj.animation_data
-        action = anim_data.action
+        fcurves = get_action_fcurves(obj)
+        if not fcurves:
+            self.report({'WARNING'}, "The active action has no curves for this armature.")
+            return {'CANCELLED'}
         props = context.scene.inplace_props
 
-        # Determine effective target bone
-        target_bone = resolve_effective_target_bone(obj, props)
-        props.bone_name = target_bone
+        target_bone = resolve_effective_target_bone(obj, props) if props.target_scope != 'OBJECT' else None
+        targets = []
+        if target_bone:
+            props.bone_name = target_bone
+            targets.append((target_bone, obj.pose.bones[target_bone]))
+        if props.target_scope in {'OBJECT', 'BOTH', 'AUTO'}:
+            targets.append((None, obj))
 
-        # Backup original action
+        inputs = []
+        for name, target in targets:
+            path = target.path_from_id("location") if name else "location"
+            samples = sample_locations(fcurves, path, target.location)
+            if samples:
+                inputs.append((name, path, samples))
+
+        if not inputs:
+            self.report({'WARNING'}, "No location keyframes on the selected target.")
+            return {'CANCELLED'}
+
+        if not (props.freeze_x or props.freeze_y or props.freeze_z or props.freeze_rot_z):
+            self.report({'WARNING'}, "Select an axis to change.")
+            return {'CANCELLED'}
+
+        action = individual_action(obj)
+        fcurves = get_action_fcurves(obj)
         if props.create_backup:
             backup = action.copy()
             backup.name = f"{action.name}_Original_Backup"
             backup.use_fake_user = True
+            if "_inplace_slot_backups" not in action:
+                action["_inplace_slot_backups"] = {}
+            action["_inplace_slot_backups"][slot_key(anim_data)] = backup
             props.last_backup_action = backup.name
 
-        targets = []
-        if props.target_scope in {'AUTO', 'BONE', 'BOTH'} and target_bone:
-            targets.append(('BONE', target_bone))
-        if props.target_scope in {'OBJECT', 'BOTH', 'AUTO'}:
-            has_obj_curves = any(c.data_path == 'location' for c in action.fcurves)
-            if has_obj_curves:
-                targets.append(('OBJECT', None))
-
-        if not targets:
-            self.report({'ERROR'}, "No valid targets found to modify.")
-            return {'CANCELLED'}
-
         curves_modified = 0
-
-        for t_type, t_name in targets:
-            if t_type == 'BONE':
-                loc_path = f'pose.bones["{t_name}"].location'
-                rot_path_euler = f'pose.bones["{t_name}"].rotation_euler'
-                rot_path_quat = f'pose.bones["{t_name}"].rotation_quaternion'
-                R = get_world_rotation_matrix(obj, t_name)
-            else:
-                loc_path = 'location'
-                rot_path_euler = 'rotation_euler'
-                rot_path_quat = 'rotation_quaternion'
-                R = get_world_rotation_matrix(obj, None)
-
-            R_inv = R.transposed()
-
-            # Find or prepare location fcurves for 0, 1, 2
-            fcs = {idx: next((c for c in action.fcurves if c.data_path == loc_path and c.array_index == idx), None) for idx in range(3)}
-            existing_fcs = [fc for fc in fcs.values() if fc is not None]
-            if not existing_fcs:
-                continue
-
-            # Find all unique keyframe frames across any location channel
-            frames = sorted(set(kp.co[0] for fc in existing_fcs for kp in fc.keyframe_points))
-            if not frames:
-                continue
-
-            # Ensure all 3 channels exist so projected 3D space is preserved without clipping
-            for idx in range(3):
-                if fcs[idx] is None:
-                    fcs[idx] = action.fcurves.new(data_path=loc_path, index=idx)
-
-            f_start = frames[0]
-            f_end = frames[-1]
-            span = f_end - f_start
-
-            loc_start = mathutils.Vector((fcs[0].evaluate(f_start), fcs[1].evaluate(f_start), fcs[2].evaluate(f_start)))
-            T_start = R @ loc_start
-
-            loc_end = mathutils.Vector((fcs[0].evaluate(f_end), fcs[1].evaluate(f_end), fcs[2].evaluate(f_end)))
-            T_end = R @ loc_end
-
-            delta_world = T_end - T_start
-
-            if props.anchor == 'ORIGIN':
-                anchor_x = 0.0
-                anchor_y = 0.0
-                anchor_z = 0.0
-            else:  # START
-                anchor_x = T_start.x
-                anchor_y = T_start.y
-                anchor_z = T_start.z
-
-            for f in frames:
-                loc_orig = mathutils.Vector((fcs[0].evaluate(f), fcs[1].evaluate(f), fcs[2].evaluate(f)))
-                T_curr = R @ loc_orig
-
-                if props.method == 'FREEZE':
-                    new_tx = anchor_x if props.freeze_x else T_curr.x
-                    new_ty = anchor_y if props.freeze_y else T_curr.y
-                    new_tz = anchor_z if props.freeze_z else T_curr.z
-                elif props.method == 'DRIFT':
-                    factor = (f - f_start) / span if span != 0 else 0.0
-                    new_tx = (T_curr.x - factor * delta_world.x) if props.freeze_x else T_curr.x
-                    new_ty = (T_curr.y - factor * delta_world.y) if props.freeze_y else T_curr.y
-                    new_tz = (T_curr.z - factor * delta_world.z) if props.freeze_z else T_curr.z
-                    if props.anchor == 'ORIGIN':
-                        if props.freeze_x:
-                            new_tx -= T_start.x
-                        if props.freeze_y:
-                            new_ty -= T_start.y
-                        if props.freeze_z:
-                            new_tz -= T_start.z
-
-                T_new = mathutils.Vector((new_tx, new_ty, new_tz))
-                loc_new = R_inv @ T_new
-
-                for idx in range(3):
-                    fc = fcs[idx]
-                    val = loc_new[idx]
-                    kp = next((k for k in fc.keyframe_points if abs(k.co[0] - f) < 0.001), None)
-                    if kp:
-                        diff = val - kp.co[1]
-                        kp.co[1] = val
-                        kp.handle_left[1] += diff
-                        kp.handle_right[1] += diff
-                    else:
-                        fc.keyframe_points.insert(f, val)
-
-            for idx in range(3):
-                fcs[idx].update()
-            curves_modified += 3
+        locked_axes = (props.freeze_x, props.freeze_y, props.freeze_z)
+        for name, path, samples in inputs:
+            basis = get_translation_basis(obj, name)
+            inverse = basis.inverted_safe()
+            start, end = min(samples), max(samples)
+            first = basis @ samples[start]
+            travel = basis @ samples[end] - first
+            anchor = mathutils.Vector((0.0, 0.0, 0.0)) if props.anchor == 'ORIGIN' else first
+            for t, loc in samples.items():
+                world = basis @ loc
+                fraction = (t - start) / (end - start) if end != start else 0.0
+                for axis, locked in enumerate(locked_axes):
+                    if locked:
+                        if props.method == 'FREEZE':
+                            world[axis] = anchor[axis]
+                        else:
+                            world[axis] += anchor[axis] - first[axis] - fraction * travel[axis]
+                samples[t] = inverse @ world
+            # An uncoupled local channel keeps its original keys, handles and modifiers.
+            axes = [i for i in range(3) if any(locked and inverse[i][w] != 0.0
+                                               for w, locked in enumerate(locked_axes))]
+            if axes:
+                write_locations(fcurves, path, samples, axes)
+            curves_modified += len(axes)
 
             # Optional: Freeze Z Rotation (Yaw)
             if props.freeze_rot_z:
-                fc_rot = next((c for c in action.fcurves if c.data_path == rot_path_euler and c.array_index == 2), None)
+                rot_path_euler = obj.pose.bones[name].path_from_id("rotation_euler") if name else "rotation_euler"
+                fc_rot = fcurves.find(rot_path_euler, index=2)
                 if fc_rot and len(fc_rot.keyframe_points) > 0:
                     anchor_rot = 0.0 if props.anchor == 'ORIGIN' else fc_rot.keyframe_points[0].co[1]
                     for kp in fc_rot.keyframe_points:
@@ -508,7 +534,7 @@ class INPLACE_OT_make_in_place(bpy.types.Operator):
         obj.update_tag()
         context.view_layer.update()
 
-        target_str = f"bone '{target_bone}'" if target_bone else "object"
+        target_str = " + ".join(f"bone '{name}'" if name else "object" for name, _, _ in inputs)
         self.report({'INFO'}, f"Animation converted to In-Place on {target_str} ({curves_modified} channels updated)!")
         return {'FINISHED'}
 
@@ -575,15 +601,14 @@ class INPLACE_OT_restore_backup(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        props = context.scene.inplace_props
-        return bool(props.last_backup_action and props.last_backup_action in bpy.data.actions)
+        return backup_for(context.active_object, context.scene.inplace_props) is not None
 
     def execute(self, context):
         obj = context.active_object
         props = context.scene.inplace_props
-        backup_act = bpy.data.actions.get(props.last_backup_action)
+        backup_act = backup_for(obj, props)
         if backup_act and obj and obj.animation_data:
-            obj.animation_data.action = backup_act
+            assign_matching_slot(obj.animation_data, backup_act)
             self.report({'INFO'}, f"Restored original action: '{backup_act.name}'")
             return {'FINISHED'}
         self.report({'WARNING'}, "Backup action not found.")
@@ -604,90 +629,54 @@ class INPLACE_OT_extract_root_bone(bpy.types.Operator):
     def execute(self, context):
         obj = context.active_object
         props = context.scene.inplace_props
-        action = obj.animation_data.action
+        fcurves = get_action_fcurves(obj)
 
         target_bone = resolve_effective_target_bone(obj, props)
         if not target_bone:
             self.report({'ERROR'}, "Please specify a target bone (e.g. Hips or Spine).")
             return {'CANCELLED'}
 
-        R = get_world_rotation_matrix(obj, target_bone)
-        R_inv = R.transposed()
-
-        loc_path = f'pose.bones["{target_bone}"].location'
-        fcs = {idx: next((c for c in action.fcurves if c.data_path == loc_path and c.array_index == idx), None) for idx in range(3)}
-        existing_fcs = [fc for fc in fcs.values() if fc is not None]
-        if not existing_fcs:
-            self.report({'ERROR'}, f"No location animation on bone '{target_bone}'.")
+        root_name = "root"
+        if target_bone == root_name:
+            self.report({'WARNING'}, "The motion is already on the root bone.")
+            return {'CANCELLED'}
+        target = obj.pose.bones[target_bone]
+        loc_path = target.path_from_id("location")
+        samples = sample_locations(fcurves, loc_path, target.location)
+        if not samples:
+            self.report({'WARNING'}, f"No location animation on bone '{target_bone}'.")
             return {'CANCELLED'}
 
-        frames = sorted(set(kp.co[0] for fc in existing_fcs for kp in fc.keyframe_points))
-
-        # Ensure a root bone exists
-        root_name = "root"
+        target_basis = get_translation_basis(obj, target_bone)
+        if root_name in obj.pose.bones and (not target.parent or target.parent.name != root_name):
+            self.report({'WARNING'}, "The existing root must parent the target to receive its motion.")
+            return {'CANCELLED'}
         if root_name not in obj.pose.bones:
+            if obj.data.users > 1:
+                obj.data = obj.data.copy()
             curr_mode = obj.mode
             bpy.ops.object.mode_set(mode='EDIT')
-            edit_bones = obj.data.edit_bones
+            try:
+                edit_bones = obj.data.edit_bones
+                root = edit_bones.new(root_name)
+                root.head = (0.0, 0.0, 0.0)
+                root.tail = (0.0, 0.2, 0.0)
+                edit_bones[target_bone].parent = root
+            finally:
+                bpy.ops.object.mode_set(mode=curr_mode)
 
-            new_root = edit_bones.new(root_name)
-            new_root.head = (0.0, 0.0, 0.0)
-            new_root.tail = (0.0, 0.2, 0.0)
-
-            # Parent target bone to root
-            if target_bone in edit_bones:
-                edit_bones[target_bone].parent = new_root
-
-            bpy.ops.object.mode_set(mode=curr_mode)
-
-        # Prepare root curves (X=0, Y=1)
-        root_path = f'pose.bones["{root_name}"].location'
-        root_fc_x = next((c for c in action.fcurves if c.data_path == root_path and c.array_index == 0), None)
-        if not root_fc_x:
-            root_fc_x = action.fcurves.new(data_path=root_path, index=0)
-
-        root_fc_y = next((c for c in action.fcurves if c.data_path == root_path and c.array_index == 1), None)
-        if not root_fc_y:
-            root_fc_y = action.fcurves.new(data_path=root_path, index=1)
-
-        root_fc_x.keyframe_points.clear()
-        root_fc_y.keyframe_points.clear()
-
-        # Transfer horizontal motion to Root, and zero out horizontal motion on target bone
-        for f in frames:
-            loc_orig = mathutils.Vector((
-                fcs[0].evaluate(f) if fcs[0] else 0.0,
-                fcs[1].evaluate(f) if fcs[1] else 0.0,
-                fcs[2].evaluate(f) if fcs[2] else 0.0,
-            ))
-            T_world = R @ loc_orig
-
-            # Key root bone with true horizontal displacement
-            root_fc_x.keyframe_points.insert(f, T_world.x)
-            root_fc_y.keyframe_points.insert(f, T_world.y)
-
-            # Neutralize horizontal translation on target bone, PRESERVING Z!
-            T_target = mathutils.Vector((0.0, 0.0, T_world.z))
-            loc_target = R_inv @ T_target
-
-            for idx in range(3):
-                fc = fcs[idx]
-                if fc:
-                    val = loc_target[idx]
-                    kp = next((k for k in fc.keyframe_points if abs(k.co[0] - f) < 0.001), None)
-                    if kp:
-                        diff = val - kp.co[1]
-                        kp.co[1] = val
-                        kp.handle_left[1] += diff
-                        kp.handle_right[1] += diff
-                    else:
-                        fc.keyframe_points.insert(f, val)
-
-        root_fc_x.update()
-        root_fc_y.update()
-        for idx in range(3):
-            if fcs[idx]:
-                fcs[idx].update()
+        individual_action(obj)
+        fcurves = get_action_fcurves(obj)
+        root_path = obj.pose.bones[root_name].path_from_id("location")
+        root_inverse = get_translation_basis(obj, root_name).inverted_safe()
+        target_inverse = target_basis.inverted_safe()
+        root_samples = {}
+        for t, loc in samples.items():
+            world = target_basis @ loc
+            root_samples[t] = root_inverse @ mathutils.Vector((world.x, world.y, 0.0))
+            samples[t] = target_inverse @ mathutils.Vector((0.0, 0.0, world.z))
+        write_locations(fcurves, root_path, root_samples)
+        write_locations(fcurves, loc_path, samples)
 
         obj.update_tag()
         context.view_layer.update()
@@ -763,7 +752,8 @@ class INPLACE_PT_main_panel(bpy.types.Panel):
         else:
             ok_box = status_col.box()
             row = ok_box.row()
-            row.label(text="IN-PLACE ANIMATION", icon='CHECKMARK')
+            status = "NO NET HORIZONTAL DRIFT" if stats['horiz_max'] > 0.05 else "IN-PLACE ANIMATION"
+            row.label(text=status, icon='CHECKMARK')
 
             sub = status_col.column(align=True)
             sub.label(text=f"X: {stats['X']['range']:.2f}m | Y: {stats['Y']['range']:.2f}m | Z: {stats['Z']['range']:.2f}m")
@@ -816,10 +806,11 @@ class INPLACE_PT_main_panel(bpy.types.Panel):
         btn_col.operator("inplace.make_in_place", text="Make In-Place", icon='PLAY')
 
         # Restore button if backup exists
-        if props.last_backup_action and props.last_backup_action in bpy.data.actions:
+        backup = backup_for(obj, props)
+        if backup is not None:
             row_restore = layout.row(align=True)
             row_restore.scale_y = 1.2
-            row_restore.operator("inplace.restore_backup", text=f"↩ Restore Backup ({props.last_backup_action})", icon='LOOP_BACK')
+            row_restore.operator("inplace.restore_backup", text=f"↩ Restore Backup ({backup.name})", icon='LOOP_BACK')
 
         # Advanced Game Engine helper
         box_adv = layout.box()
